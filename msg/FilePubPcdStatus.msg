@@ -1,25 +1,24 @@
 string home_folder
 string current_folder
+string selected_folder
 string[] current_folders
+string[] supported_file_types
+int32 file_count
+string[] pub_files_list
+string[] pub_name_list
 
 bool paused
 
-int32 img_count
-bool img_random
-bool img_overlay
-float32 img_delay
-bool img_pub_running
+bool set_random
+float32[] min_max_delay
+float32 set_delay
+bool pub_transforms
+bool create_transforms
 
-int32 vid_count
-bool vid_random
-bool vid_overlay
-bool vid_pub_running
+bool running
 
 
-int32 pc_count
-int32 pc_max_pub
-int32 pc_pub_tfs
-bool pc_pub_running
+
 
 
 
