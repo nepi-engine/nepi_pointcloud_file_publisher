@@ -9,42 +9,80 @@
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 
-//import Section from "./Section"
+import Section from "./Section"
 import { Columns, Column } from "./Columns"
-import Label from "./Label"
 import Select, { Option } from "./Select"
+import { SliderAdjustment } from "./AdjustmentWidgets"
 import Button, { ButtonMenu } from "./Button"
+import Label from "./Label"
+import Input from "./Input"
+import Toggle from "react-toggle"
+import Styles from "./Styles"
+import BooleanIndicator from "./BooleanIndicator"
+
 
 import CameraViewer from "./CameraViewer"
+
+import {createShortUniqueValues, onDropdownSelectedSendStr, createMenuListFromStrList} from "./Utilities"
 import {createShortValuesFromNamespaces} from "./Utilities"
 
-import NepiIFSaveData from "./Nepi_IF_SaveData"
+function round(value, decimals = 0) {
+  return Number(value).toFixed(decimals)
+  //return value && Number(Math.round(value + "e" + decimals) + "e-" + decimals)
+}
 
 @inject("ros")
 @observer
 
-// MultiImageViewer Application page
-class ImageViewerApp extends Component {
-
+class FilePubPcdApp extends Component {
   constructor(props) {
     super(props)
 
     this.state = {
-      appName: "app_image_viewer",
-      appNamespace: null,
+		
+      appName: 'app_file_pub_pcd',
+	    appNamespace: null,
 
-      selectedImageTopics: ['None','None','None','None'],
+      viewableFolders: false,
+
+      home_folder: 'None',
+      current_folder: null,
+      selected_folder: 'Home',
+      current_folders: [],
+      supported_file_types: [],
+      selected_file: 'Home',
+      file_count: 0,
+      current_file_list: [],
+      current_topic_list: [],
+
+      paused: false,
+
+      set_random: false,
+      min_max_delay: 1,
+      set_delay: 1,
+
+      pub_transforms: false,
+      create_transforms: false,
+
+      pub_running: false,
+
       statusListener: null,
       connected: false,
       needs_update: true
+
     }
-    this.createImageTopicsOptions = this.createImageTopicsOptions.bind(this)
-    this.onChangeInputImgSelection = this.onChangeInputImgSelection.bind(this)
+
+    this.createFolderOptions = this.createFolderOptions.bind(this)
+    this.onChangeFolderSelection = this.onChangeFolderSelection.bind(this)
+    this.toggleViewableFolders = this.toggleViewableFolders.bind(this)
+
     this.statusListener = this.statusListener.bind(this)
     this.updateStatusListener = this.updateStatusListener.bind(this)
     this.getAppNamespace = this.getAppNamespace.bind(this)
-    this.getSelectedImageTopics = this.getSelectedImageTopics.bind(this)
+
+
   }
+
 
   getAppNamespace(){
     const { namespacePrefix, deviceId} = this.props.ros
@@ -58,10 +96,43 @@ class ImageViewerApp extends Component {
   // Callback for handling ROS Status messages
   statusListener(message) {
     this.setState({
-      selectedImageTopics: message.entries
+      home_folder: message.home_folder ,
+      current_folders: message.current_folders ,
+      selected_folder: message.selected_folder,
+      supported_file_types: message.supported_file_types,
+      file_count: message.file_count ,
+      current_file_list: message.current_file_list ,
+      current_topic_list: message.current_topic_list ,
+      
+      paused: message.paused ,
+
+      size_options_list: message.size_options_list ,
+      set_size: message.set_size ,
+      encoding_options_list: message.encoding_options_list ,
+      set_encoding: message.set_encoding ,
+
+
+      set_random: message.set_random ,
+      min_max_delay: message.min_max_delay ,
+      set_delay: message.set_delay ,
+
+      pub_transforms: message.pub_transforms,
+      create_transforms: message.create_transforms,
+
+      pub_running: message.running
   })
 
-    this.setState({
+  var current_folder = 'None'
+  if (message.current_folder === message.home_folder ){
+    current_folder = 'Home'
+  }
+  else {
+    current_folder = message.current_folder
+  }
+
+
+  this.setState({
+      current_folder: current_folder,
       connected: true
     })
 
@@ -70,13 +141,14 @@ class ImageViewerApp extends Component {
 
     // Function for configuring and subscribing to Status
     updateStatusListener() {
-      const statusNamespace = this.state.appNamespace + '/status'
+      const namespace = this.getAppNamespace()
+      const statusNamespace = namespace + '/status'
       if (this.state.statusListener) {
         this.state.statusListener.unsubscribe()
       }
       var statusListener = this.props.ros.setupStatusListener(
             statusNamespace,
-            "nepi_ros_interfaces/StringArray",
+            "nepi_app_file_pub_pcd/FilePubPcdStatus",
             this.statusListener
           )
       this.setState({ 
@@ -110,139 +182,199 @@ class ImageViewerApp extends Component {
 
 
 
+  renderPubControls() {
+    const {sendTriggerMsg, sendStringMsg} = this.props.ros
+    const appNamespace = this.state.appNamespace
+    const pubRunning = this.state.pub_running
+    const appImageTopic = pubRunning === true ? this.state.appNamespace + "/images" : null
+    const viewableFolders = (this.state.viewableFolders || pubRunning === false)
+    return (
+
+
+    <Columns>
+    <Column>
+
+
+        <div hidden={!this.state.connected}>
+
+          <Label title={"Publishing"}>
+              <BooleanIndicator value={pubRunning} />
+            </Label>
+
+              <div hidden={pubRunning}>
+            <ButtonMenu>
+              <Button 
+                disabled={pubRunning}
+                onClick={() => this.props.ros.sendTriggerMsg(appNamespace + "/start_pub")}>{"Start Publishing"}</Button>
+            </ButtonMenu>
+            </div>
+
+            <div hidden={!pubRunning}>
+            <ButtonMenu>
+              <Button onClick={() => this.props.ros.sendTriggerMsg(appNamespace + "/stop_pub")}>{"Stop Publishing"}</Button>
+            </ButtonMenu>
+            </div>
+
+
+            <Label title={"Current Folder"}>
+            <Input disabled value={this.state.current_folder} />
+            </Label>
+
+            <Label title={"Pcd File Count"}>
+            <Input disabled value={this.state.file_count} />
+            </Label>
+
+        </div>
+
+        </Column>
+        </Columns>
+
+
+    )
+  }
+
+
+
 
   // Function for creating image topic options.
-  createImageTopicsOptions() {
+  createFolderOptions() {
+    const cur_folder = this.state.current_folder
+    const sel_folder = this.state.selected_folder
     var items = []
-    items.push(<Option>{"None"}</Option>) 
-    const { imageTopics } = this.props.ros
-    var imageTopicShortnames = createShortValuesFromNamespaces(imageTopics)
-    for (var i = 0; i < imageTopics.length; i++) {
-      items.push(<Option value={imageTopics[i]}>{imageTopicShortnames[i]}</Option>)
+    if (cur_folder){
+      items.push(<Option value={"Home"}>{"Home"}</Option>) 
+      if (sel_folder !== 'Home'){
+        items.push(<Option value={"Back"}>{"Back"}</Option>) 
+      }
+      const folders = this.state.current_folders
+      for (var i = 0; i < folders.length; i++) {
+        items.push(<Option value={folders[i]}>{folders[i]}</Option>)
+      }
     }
     return items
   }
 
-  onChangeInputImgSelection(event) {
-    const {sendImageSelectionMsg} = this.props.ros
-    var imageTopics = this.state.selectedImageTopics
-    const namespace = this.getAppNamespace() 
-    const selNamespace = namespace + "/set_topic"
-    const idx = event.nativeEvent.target.selectedIndex
-    const text = event.nativeEvent.target[idx].text
+  onChangeFolderSelection(event) {
+    const {sendTriggerMsg, sendStringMsg} = this.props.ros
+    const namespace = this.state.appNamespace
+    const setNamespace = namespace + "/select_folder"
+    const homeNamespace = namespace + "/home_folder"
+    const backNamespace = namespace + "/back_folder"
+    const home_folder = this.state.home_folder
     const value = event.target.value
     if (namespace !== null){    
       var selector_idx = 0
-      if (event.nativeEvent.target.id === "ImageSelector_1") {
-        selector_idx = 1
+      if (value === 'Home') {
+        sendTriggerMsg(homeNamespace)
       }
-      else if (event.nativeEvent.target.id === "ImageSelector_2") {
-        selector_idx = 2
+      else if (value === 'Back') {
+        sendTriggerMsg(backNamespace)
       }
-      else if (event.nativeEvent.target.id === "ImageSelector_3") {
-        selector_idx = 3
+      else {
+        sendStringMsg(setNamespace,value)
       }
-
-      imageTopics[selector_idx] = value
-      sendImageSelectionMsg(selNamespace,selector_idx,value)
     }
-    this.setState({selectedImageTopics: imageTopics})
-
+    this.setState({selected_folder: value})
   }
 
-  getSelectedImageTopics(){
-    const imageTopics = this.state.selectedImageTopics
-    return imageTopics
+
+
+  toggleViewableFolders() {
+    const viewable = !this.state.viewableFolders
+    this.setState({viewableFolders: viewable})
   }
 
-  render() {
-    const selectedImageTopics = this.getSelectedImageTopics()
-    const appNamespace = this.getAppNamespace()
-    const imageOptions = this.createImageTopicsOptions()
-    const colCount = ((selectedImageTopics[1] !== 'None') || (selectedImageTopics[2] !== 'None') || (selectedImageTopics[3] !== 'None'))? 3 : 2
-    const selectionFlexSize = (colCount === 3)? 0.6 : 0.3
-    
-    
+
+ render() {
+    const {sendTriggerMsg, sendStringMsg} = this.props.ros
+    const appNamespace = this.state.appNamespace
+    const folderOptions = this.createFolderOptions()
+    const pubRunning = this.state.pub_running
+    const appImageTopic = pubRunning === true ? this.state.appNamespace + "/images" : null
+    const viewableFolders = (this.state.viewableFolders || pubRunning === false)
     return (
-      <Columns>
-        <Column>
 
-      <Columns>
-        <Column>
+    <Columns>
+      <Column>
+
           <CameraViewer
-            imageTopic={selectedImageTopics[0]}
-            title={selectedImageTopics[0]}
+            imageTopic={appImageTopic}
+            title={this.state.imageText}
             hideQualitySelector={false}
           />
-          {(selectedImageTopics[2] !== 'None')?
-            <CameraViewer
-            imageTopic={selectedImageTopics[2]}
-            title={selectedImageTopics[2]}
-            hideQualitySelector={false}
-          />          
-          : null
-          }
-        </Column>
-        {(colCount === 3)?
-        <Column>
-          <CameraViewer
-            imageTopic={selectedImageTopics[1]}
-            title={selectedImageTopics[1]}
-            hideQualitySelector={false}
-          />
-          {(selectedImageTopics[3] !== 'None')?
-            <CameraViewer
-              imageTopic={selectedImageTopics[3]}
-              title={selectedImageTopics[3]}
-              hideQualitySelector={false}
-            />          
-          : null
-          }
-        </Column>
-        : null
-        }
 
-        <Column style={{flex: selectionFlexSize}}>
-          <Label title={"Img 1"}>
-            <Select onChange={this.onChangeInputImgSelection} id="ImageSelector_0">
-              {imageOptions}
-            </Select>
-          </Label>
-          <Label title={"Img 2"}>
-            <Select onChange={this.onChangeInputImgSelection} id="ImageSelector_1">
-              {imageOptions}
-            </Select>
-          </Label>
-          <Label title={"Img 3"}>
-            <Select onChange={this.onChangeInputImgSelection} id="ImageSelector_2">
-              {imageOptions}
-            </Select>
-          </Label>
-          <Label title={"Img 4"}>
-            <Select onChange={this.onChangeInputImgSelection} id="ImageSelector_3">
-              {imageOptions}
-            </Select>
-          </Label>
-          <div align={"left"} textAlign={"left"}  >
-            <ButtonMenu>
-              <Button onClick={this.onEventTriggered}>{"Event Trigger"}</Button>
-            </ButtonMenu>
-          </div>
-        </Column>
-      </Columns>
-
-      <div hidden={appNamespace === null}>
-      <NepiIFSaveData
-          saveNamespace={appNamespace}
-          title={"Nepi_IF_SaveData"}
-      />
-      </div>
 
     </Column>
+    <Column>
+
+
+        <Columns>
+        <Column>
+
+
+            <label style={{fontWeight: 'bold'}} align={"left"} textAlign={"left"}>
+            {"Select Folder"}
+          </label>
+
+            <div onClick={this.toggleViewableFolders} style={{backgroundColor: Styles.vars.colors.grey0}}>
+              <Select style={{width: "10px"}}/>
+            </div>
+            <div hidden={viewableFolders === false}>
+            {folderOptions.map((folder) =>
+            <div onClick={this.onChangeFolderSelection}>
+              <body value = {folder} style={{color: Styles.vars.colors.black}}>{folder}</body>
+            </div>
+            )}
+            </div>
+    
+
+        </Column>
+        <Column>
+
+        {this.renderPubControls()}
+
+        </Column>
+        </Columns>
+
+
+        <div style={{ borderTop: "1px solid #ffffff", marginTop: Styles.vars.spacing.medium, marginBottom: Styles.vars.spacing.xs }}/>
+
+        <div hidden={!this.state.connected}>
+
+        <Columns>
+        <Column>
+
+          <ButtonMenu>
+          <Button onClick={() => sendTriggerMsg( appNamespace + "/reset_app")}>{"Reset App"}</Button>
+          </ButtonMenu>
+
+        </Column>
+        <Column>
+
+          <ButtonMenu>
+          <Button onClick={() => sendTriggerMsg(appNamespace + "/reset_config")}>{"Reset Config"}</Button>
+          </ButtonMenu>
+
+        </Column>
+        <Column>
+
+          <ButtonMenu>
+          <Button onClick={() => sendTriggerMsg(appNamespace + "/save_config")}>{"Save Config"}</Button>
+          </ButtonMenu>
+
+        </Column>
+        </Columns>
+      
+       </div>
+
+
+
+  </Column>
     </Columns>
 
     )
   }
+
 }
 
-export default ImageViewerApp
+export default FilePubPcdApp
