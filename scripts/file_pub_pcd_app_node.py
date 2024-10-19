@@ -50,7 +50,7 @@ class NepiFilePubImgApp(object):
 
   HOME_FOLDER = "/mnt/nepi_storage"
 
-  SUPPORTED_FILE_TYPES = ['png','PNG','jpg','jpeg','JPG']
+  SUPPORTED_FILE_TYPES = ['pcd']
 
   #Set Initial Values
   MIN_DELAY = 0.05
@@ -116,181 +116,6 @@ class NepiFilePubImgApp(object):
     # Spin forever (until object is detected)
     rospy.spin()
 
-
-  #############################
-  ## APP callbacks
-
-  def updaterCb(self,timer):
-    update_status = False
-    # Get settings from param server
-    current_folder = rospy.get_param('~current_folder', self.init_current_folder)
-    #nepi_msg.publishMsgWarn(self,"Current Folder: " + str(current_folder))
-    #nepi_msg.publishMsgWarn(self,"Last Folder: " + str(self.last_folder))
-    # Update folder info
-    if current_folder != self.last_folder:
-      update_status = True
-      if os.path.exists(current_folder):
-        #nepi_msg.publishMsgWarn(self,"Current Folder Exists")
-        current_paths = nepi_ros.get_folder_list(current_folder)
-        current_folders = []
-        for path in current_paths:
-          folder = os.path.basename(path)
-          if folder[0] != ".":
-            current_folders.append(folder)
-        self.current_folders = sorted(current_folders)
-        #nepi_msg.publishMsgWarn(self,"Folders: " + str(self.current_folders))
-        num_files = 0
-        for f_type in self.SUPPORTED_FILE_TYPES:
-          num_files = num_files + nepi_ros.get_file_count(current_folder,f_type)
-        self.file_count =  num_files
-      self.last_folder = current_folder
-    if update_status == True:
-      self.publish_status()
-
-  def selectFolderCb(self,msg):
-    current_folder = rospy.get_param('~current_folder',self.init_current_folder)
-    new_folder = msg.data
-    new_path = os.path.join(current_folder,new_folder)
-    if os.path.exists(new_path):
-      self.last_folder = current_folder
-      rospy.set_param('~current_folder',new_path)
-    self.publish_status()
-
-
-  def homeFolderCb(self,msg):
-    rospy.set_param('~current_folder',self.HOME_FOLDER)
-    self.publish_status()
-
-  def backFolderCb(self,msg):
-    current_folder = rospy.get_param('~current_folder',self.init_current_folder)
-    if current_folder != self.HOME_FOLDER:
-      new_folder = os.path.dirname(current_folder )
-      if os.path.exists(new_folder):
-        self.last_folder = current_folder
-        rospy.set_param('~current_folder',new_folder)
-    self.publish_status()
-
-
-
-
-  #############################
-  ## Image callbacks
-
-
-  def setDelayCb(self,msg):
-    ##nepi_msg.publishMsgInfo(self,msg)
-    delay = msg.data
-    if delay < self.MIN_DELAY:
-      delay = self.MIN_DELAY
-    if delay > self.MAX_DELAY:
-      delay = self.MAX_DELAY
-    rospy.set_param('~delay',delay)
-    self.publish_status()
-
-
-  def startPubCb(self,msg):
-    if self.running == False:
-      current_folder = rospy.get_param('~current_folder', self.init_current_folder)
-      if self.pub_pub != None:
-        self.pub_pub.unregister()
-        time.sleep(1)
-      self.pub_pub = rospy.Publisher("~images", Image, queue_size=1, latch=True)
-      # Now start publishing images
-      self.file_list = []
-      self.num_files = 0
-      if os.path.exists(current_folder):
-        for f_type in self.SUPPORTED_FILE_TYPES:
-          [file_list, num_files] = nepi_ros.get_file_list(current_folder,f_type)
-          self.file_list.extend(file_list)
-          self.num_files += num_files
-          #nepi_msg.publishMsgWarn(self,"File Pub List: " + str(self.file_list))
-          #nepi_msg.publishMsgWarn(self,"File Pub Count: " + str(self.num_files))
-        if self.num_files > 0:
-          self.current_ind = 0
-          rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
-          self.running = True
-          rospy.set_param('~running',True)
-        else:
-          nepi_msg.publishMsgInfo(self,"No image files found in folder " + current_folder + " not found")
-      else:
-        nepi_msg.publishMsgInfo(self,"Folder " + current_folder + " not found")
-    self.publish_status()
-
-  def stopPubCb(self,msg):
-    self.running = False
-    rospy.set_param('~running',False)
-    time.sleep(1)
-    if self.pub_pub != None:
-      self.pub_pub.unregister()
-    self.current_file = "None"
-    self.publish_status()
-
-
-  def publishCb(self,timer):
-
-    if self.running :
-      if self.pub_pub != None:
-        # Set current index
-
-        # Check ind bounds
-        if self.current_ind > (self.num_files-1):
-          self.current_ind = 0 # Start over
-        elif self.current_ind < 0:
-          self.current_ind = self.num_files-1
-        file2open = self.file_list[self.current_ind]
-        self.current_file = file2open.split('/')[-1]
-        #nepi_msg.publishMsgInfo(self,"Opening File: " + file2open)
- 
-
-
-
-    else:
-      self.current_ind = 0
-    if self.running == True:
-      delay = rospy.get_param('~delay',  self.init_delay) -1
-      if delay < 0:
-        delay == 0
-      nepi_ros.sleep(delay)
-      rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
-
-
-
-  ###################
-  ## Status Publisher
-  def publish_status(self):
-    status_msg = FilePubImgStatus()
-
-    status_msg.home_folder = self.HOME_FOLDER
-    current_folder = rospy.get_param('~current_folder', self.init_current_folder)
-    status_msg.current_folder = current_folder
-    if current_folder == self.HOME_FOLDER:
-      selected_folder = 'Home'
-    else:
-      selected_folder = os.path.basename(current_folder)
-    status_msg.selected_folder = selected_folder
-    status_msg.current_folders = self.current_folders
-    status_msg.supported_file_types = self.SUPPORTED_FILE_TYPES
-    status_msg.file_count = self.file_count
-
-    status_msg.current_file_list = self.current_file_list
-    status_msg.current_topic_list = self.current_topic_list
-
-
-
-    status_msg.min_max_delay = [self.MIN_DELAY, self.MAX_DELAY]
-    status_msg.set_delay = rospy.get_param('~delay',  self.init_delay)
-
-    status_msg.pub_transforms = rospy.get_param('~pub_transforms',  self.init_pub_transforms)
-    status_msg.create_transforms = rospy.get_param('~create_transforms',  self.init_create_transforms)
-
-    status_msg.running = rospy.get_param('~running',self.init_running)
-
-    self.status_pub.publish(status_msg)
-
-
-
-
-
   #######################
   ### App Config Functions
 
@@ -344,6 +169,187 @@ class NepiFilePubImgApp(object):
     if do_updates:
       self.updateFromParamServer()
       self.publish_status()
+
+
+  ###################
+  ## Status Publisher
+  def publish_status(self):
+    status_msg = FilePubImgStatus()
+
+    status_msg.home_folder = self.HOME_FOLDER
+    current_folder = rospy.get_param('~current_folder', self.init_current_folder)
+    status_msg.current_folder = current_folder
+    if current_folder == self.HOME_FOLDER:
+      selected_folder = 'Home'
+    else:
+      selected_folder = os.path.basename(current_folder)
+    status_msg.selected_folder = selected_folder
+    status_msg.current_folders = self.current_folders
+    status_msg.supported_file_types = self.SUPPORTED_FILE_TYPES
+    status_msg.file_count = self.file_count
+
+    status_msg.current_file_list = self.current_file_list
+    status_msg.current_topic_list = self.current_topic_list
+
+
+
+    status_msg.min_max_delay = [self.MIN_DELAY, self.MAX_DELAY]
+    status_msg.set_delay = rospy.get_param('~delay',  self.init_delay)
+
+    status_msg.pub_transforms = rospy.get_param('~pub_transforms',  self.init_pub_transforms)
+    status_msg.create_transforms = rospy.get_param('~create_transforms',  self.init_create_transforms)
+
+    status_msg.running = rospy.get_param('~running',self.init_running)
+
+    self.status_pub.publish(status_msg)
+
+
+  #############################
+  ## APP callbacks
+
+  def updaterCb(self,timer):
+    update_status = False
+    # Get settings from param server
+    current_folder = rospy.get_param('~current_folder', self.init_current_folder)
+    #nepi_msg.publishMsgWarn(self,"Current Folder: " + str(current_folder))
+    #nepi_msg.publishMsgWarn(self,"Last Folder: " + str(self.last_folder))
+    # Update folder info
+    if current_folder != self.last_folder:
+      update_status = True
+      if os.path.exists(current_folder):
+        #nepi_msg.publishMsgWarn(self,"Current Folder Exists")
+        current_paths = nepi_ros.get_folder_list(current_folder)
+        current_folders = []
+        for path in current_paths:
+          folder = os.path.basename(path)
+          if folder[0] != ".":
+            current_folders.append(folder)
+        self.current_folders = sorted(current_folders)
+        #nepi_msg.publishMsgWarn(self,"Folders: " + str(self.current_folders))
+        num_files = 0
+        for f_type in self.SUPPORTED_FILE_TYPES:
+          num_files = num_files + nepi_ros.get_file_count(current_folder,f_type)
+        self.file_count =  num_files
+      self.last_folder = current_folder
+    # Start publishing if needed
+    running = rospy.get_param('~running',self.init_running)
+    if running and self.pub_pub == None:
+      self.startPub()
+      update_status = True
+    # Publish status if needed
+    if update_status == True:
+      self.publish_status()
+
+  def selectFolderCb(self,msg):
+    current_folder = rospy.get_param('~current_folder',self.init_current_folder)
+    new_folder = msg.data
+    new_path = os.path.join(current_folder,new_folder)
+    if os.path.exists(new_path):
+      self.last_folder = current_folder
+      rospy.set_param('~current_folder',new_path)
+    self.publish_status()
+
+
+  def homeFolderCb(self,msg):
+    rospy.set_param('~current_folder',self.HOME_FOLDER)
+    self.publish_status()
+
+  def backFolderCb(self,msg):
+    current_folder = rospy.get_param('~current_folder',self.init_current_folder)
+    if current_folder != self.HOME_FOLDER:
+      new_folder = os.path.dirname(current_folder )
+      if os.path.exists(new_folder):
+        self.last_folder = current_folder
+        rospy.set_param('~current_folder',new_folder)
+    self.publish_status()
+
+
+
+
+  #############################
+  ## Image callbacks
+
+
+  def setDelayCb(self,msg):
+    ##nepi_msg.publishMsgInfo(self,msg)
+    delay = msg.data
+    if delay < self.MIN_DELAY:
+      delay = self.MIN_DELAY
+    if delay > self.MAX_DELAY:
+      delay = self.MAX_DELAY
+    rospy.set_param('~delay',delay)
+    self.publish_status()
+
+  def startPubCb(self,msg):
+    self.startPub()
+
+  def startPub(self):
+   if self.pub_pub == None:
+      self.pub_pub = rospy.Publisher("~images", Image, queue_size=1, latch=True)
+      time.sleep(1)
+      current_folder = rospy.get_param('~current_folder', self.init_current_folder)
+      # Now start publishing images
+      self.file_list = []
+      self.num_files = 0
+      if os.path.exists(current_folder):
+        for f_type in self.SUPPORTED_FILE_TYPES:
+          [file_list, num_files] = nepi_ros.get_file_list(current_folder,f_type)
+          self.file_list.extend(file_list)
+          self.num_files += num_files
+          #nepi_msg.publishMsgWarn(self,"File Pub List: " + str(self.file_list))
+          #nepi_msg.publishMsgWarn(self,"File Pub Count: " + str(self.num_files))
+        if self.num_files > 0:
+          self.current_ind = 0
+          rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
+          running = True
+          rospy.set_param('~running',True)
+        else:
+          nepi_msg.publishMsgInfo(self,"No image files found in folder " + current_folder + " not found")
+      else:
+        nepi_msg.publishMsgInfo(self,"Folder " + current_folder + " not found")
+    self.publish_status()
+
+  def stopPubCb(self,msg):
+    running = rospy.get_param('~running',self.init_running)
+    running = False
+    rospy.set_param('~running',False)
+    time.sleep(1)
+    if self.pub_pub != None:
+      self.pub_pub.unregister()
+      time.sleep(1)
+      self.pub_pub = None
+    self.current_file = "None"
+    self.publish_status()
+
+
+  def publishCb(self,timer):
+    running = rospy.get_param('~running',self.init_running)
+    if running :
+      if self.pub_pub != None:
+        # Set current index
+
+        # Check ind bounds
+        if self.current_ind > (self.num_files-1):
+          self.current_ind = 0 # Start over
+        elif self.current_ind < 0:
+          self.current_ind = self.num_files-1
+        file2open = self.file_list[self.current_ind]
+        self.current_file = file2open.split('/')[-1]
+        #nepi_msg.publishMsgInfo(self,"Opening File: " + file2open)
+ 
+    running = rospy.get_param('~running',self.init_running)
+    if running == True:
+      delay = rospy.get_param('~delay',  self.init_delay) -1
+      if delay < 0:
+        delay == 0
+      nepi_ros.sleep(delay)
+      rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
+    else:
+      self.current_ind = 0
+      if self.pub_pub != None:
+        self.pub_pub.unregister()
+        time.sleep(1)
+        self.pub_pub = None
 
 
                
