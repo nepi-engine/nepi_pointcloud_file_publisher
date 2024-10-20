@@ -52,12 +52,13 @@ class FilePubPcdApp extends Component {
       supported_file_types: [],
       selected_file: 'Home',
       file_count: 0,
+      max_pubs: 5,
       current_file_list: [],
       current_topic_list: [],
 
       paused: false,
 
-      set_random: false,
+
       min_max_delay: 1,
       set_delay: 1,
 
@@ -101,18 +102,12 @@ class FilePubPcdApp extends Component {
       selected_folder: message.selected_folder,
       supported_file_types: message.supported_file_types,
       file_count: message.file_count ,
+      max_pubs: message.max_pubs,
       current_file_list: message.current_file_list ,
       current_topic_list: message.current_topic_list ,
       
       paused: message.paused ,
 
-      size_options_list: message.size_options_list ,
-      set_size: message.set_size ,
-      encoding_options_list: message.encoding_options_list ,
-      set_encoding: message.set_encoding ,
-
-
-      set_random: message.set_random ,
       min_max_delay: message.min_max_delay ,
       set_delay: message.set_delay ,
 

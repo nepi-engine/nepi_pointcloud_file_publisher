@@ -11,16 +11,15 @@
 
 import os
 # ROS namespace setup
-#NEPI_BASE_NAMESPACE = '/nepi/s2x/'
-#os.environ["ROS_NAMESPACE"] = NEPI_BASE_NAMESPACE[0:-1] # remove to run as automation script
+NEPI_BASE_NAMESPACE = '/nepi/s2x/'
+os.environ["ROS_NAMESPACE"] = NEPI_BASE_NAMESPACE[0:-1] # remove to run as automation script
 import rospy
 import time
 import sys
 import numpy as np
 import cv2
 import open3d as o3d
-
-
+import yaml
 
 from nepi_edge_sdk_base import nepi_ros
 from nepi_edge_sdk_base import nepi_img
@@ -29,13 +28,15 @@ from nepi_edge_sdk_base import nepi_img
 from nepi_edge_sdk_base import nepi_ros
 from nepi_edge_sdk_base import nepi_save
 from nepi_edge_sdk_base import nepi_msg
-from nepi_edge_sdk_base import nepi_img 
+from nepi_edge_sdk_base import nepi_pc 
 
-from nepi_app_file_pub_img.msg import FilePubImgStatus
+from nepi_app_file_pub_pcd.msg import FilePubPcdStatus
 
 from std_msgs.msg import UInt8, Int32, Float32, Empty, String, Bool, Header
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import PointCloud2
+
+from nepi_ros_interfaces.msg import Frame3DTransform, Frame3DTransformUpdate
 
 from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
@@ -43,36 +44,56 @@ from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
 
 
 #########################################
-# Node Class
+# Node File
 #########################################
 
-class NepiFilePubImgApp(object):
+class NepiFilePubPcdApp(object):
 
   HOME_FOLDER = "/mnt/nepi_storage"
 
   SUPPORTED_FILE_TYPES = ['pcd']
 
   #Set Initial Values
+  MAX_FILES = 20
+  MAX_PUBS = 5
   MIN_DELAY = 0.05
   MAX_DELAY = 5.0
   FACTORY_IMG_PUB_DELAY = 1.0
 
   UPDATER_DELAY_SEC = 1.0
+
+  ZERO_TRANSFORM_DICT = {
+    'x_m': 0, 
+    'y_m': 0,
+    'z_m': 0,
+    'roll_deg': 0,
+    'pitch_deg': 0,
+    'yaw_deg': 0,
+    'heading_deg': 0,
+  }
   
+  paused = False
 
   last_folder = ""
   current_folders = []
   current_file_list = []
   current_topic_list = []
 
+  available_files_list = []
+  selected_files_list = []
+  sel_all = False
+
   running = False
   file_count = 0
-  pub_pub = None
+  pcd_pub = None
+
+  pcds_dict = dict()
+  tf_subs_list = []
 
 
   #######################
   ### Node Initialization
-  DEFAULT_NODE_NAME = "app_file_pub_img" # Can be overwitten by luanch command
+  DEFAULT_NODE_NAME = "app_file_pub_pcd" # Can be overwitten by luanch command
   def __init__(self):
     #### APP NODE INIT SETUP ####
     nepi_ros.init_node(name= self.DEFAULT_NODE_NAME)
@@ -90,19 +111,27 @@ class NepiFilePubImgApp(object):
                                  paramsModifiedCallback=self.updateFromParamServer)
 
     # Create class publishers
-    self.status_pub = rospy.Publisher("~status", FilePubImgStatus, queue_size=1, latch=True)
+    self.status_pub = rospy.Publisher("~status", FilePubPcdStatus, queue_size=1, latch=True)
 
     # Start updater process
     rospy.Timer(rospy.Duration(self.UPDATER_DELAY_SEC), self.updaterCb)
 
-    # General Class Subscribers
+    # General File Subscribers
     rospy.Subscriber('~reset_app', Empty, self.resetAppCb, queue_size = 10)
     rospy.Subscriber('~select_folder', String, self.selectFolderCb)
     rospy.Subscriber('~home_folder', Empty, self.homeFolderCb)
     rospy.Subscriber('~back_folder', Empty, self.backFolderCb)
 
+    add_all_sub = rospy.Subscriber('~add_all_target_files', Empty, self.addAllFilesCb, queue_size = 10)
+    remove_all_sub = rospy.Subscriber('~remove_all_target_files', Empty, self.removeAllFilesCb, queue_size = 10)
+    add_file_sub = rospy.Subscriber('~add_target_file', String, self.addFileCb, queue_size = 10)
+    remove_file_sub = rospy.Subscriber('~remove_target_file', String, self.removeFileCb, queue_size = 10)
+
+
     # Image Pub Scubscirbers and publishers
     rospy.Subscriber('~set_delay', Float32, self.setDelayCb) 
+    rospy.Subscriber('~set_pub_transforms', Bool, self.setPubTransformsCb) 
+    rospy.Subscriber('~set_create_transforms', Bool, self.setCreateTransformsCb) 
     rospy.Subscriber('~start_pub', Empty, self.startPubCb)
     rospy.Subscriber('~stop_pub', Empty, self.stopPubCb)
 
@@ -124,6 +153,7 @@ class NepiFilePubImgApp(object):
 
   def resetApp(self):
     rospy.set_param('~current_folder', self.HOME_FOLDER)
+    rospy.set_param('~sel_files', [])
 
     rospy.set_param('~delay', self.FACTORY_IMG_PUB_DELAY)
 
@@ -134,7 +164,7 @@ class NepiFilePubImgApp(object):
 
     self.publish_status()
 
-  def saveConfigCb(self, msg):  # Just update Class init values. Saving done by Config IF system
+  def saveConfigCb(self, msg):  # Just update File init values. Saving done by Config IF system
     pass # Left empty for sim, Should update from param server
 
   def setCurrentAsDefault(self):
@@ -149,6 +179,13 @@ class NepiFilePubImgApp(object):
   def initParamServerValues(self,do_updates = True):
     self.init_current_folder = rospy.get_param('~current_folder', self.HOME_FOLDER)
 
+    sel_files = rospy.get_param('~sel_files', ['All'])
+    if 'All' in sel_files:
+      self.sel_all = True
+      time.sleep(1)
+    self.init_sel_files = rospy.get_param('~sel_files', [])
+        
+
     self.init_delay = rospy.get_param('~delay', self.FACTORY_IMG_PUB_DELAY)
     self.init_running = rospy.get_param('~running', False)
 
@@ -159,6 +196,8 @@ class NepiFilePubImgApp(object):
 
   def resetParamServer(self,do_updates = True):
     rospy.set_param('~current_folder', self.init_current_folder)
+
+    rospy.set_param('~sel_files', self.init_sel_files)
 
     rospy.set_param('~delay',  self.init_delay)
 
@@ -171,10 +210,11 @@ class NepiFilePubImgApp(object):
       self.publish_status()
 
 
+
   ###################
   ## Status Publisher
   def publish_status(self):
-    status_msg = FilePubImgStatus()
+    status_msg = FilePubPcdStatus()
 
     status_msg.home_folder = self.HOME_FOLDER
     current_folder = rospy.get_param('~current_folder', self.init_current_folder)
@@ -188,11 +228,15 @@ class NepiFilePubImgApp(object):
     status_msg.supported_file_types = self.SUPPORTED_FILE_TYPES
     status_msg.file_count = self.file_count
 
+    status_msg.max_files = self.MAX_FILES
+    status_msg.available_files_list = self.available_files_list
+    status_msg.selected_files_list = rospy.get_param('~sel_files', self.init_sel_files)
+
     status_msg.current_file_list = self.current_file_list
     status_msg.current_topic_list = self.current_topic_list
 
 
-
+    status_msg.max_pubs = self.MAX_PUBS
     status_msg.min_max_delay = [self.MIN_DELAY, self.MAX_DELAY]
     status_msg.set_delay = rospy.get_param('~delay',  self.init_delay)
 
@@ -231,9 +275,32 @@ class NepiFilePubImgApp(object):
           num_files = num_files + nepi_ros.get_file_count(current_folder,f_type)
         self.file_count =  num_files
       self.last_folder = current_folder
+
+      if self.sel_all == True:
+        self.addAllFiles()
+      # Now start publishing images
+      self.file_list = []
+      self.num_files = 0
+      if os.path.exists(current_folder):
+        for ind, f_type in enumerate(self.SUPPORTED_FILE_TYPES):
+          [file_list, num_files] = nepi_ros.get_file_list(current_folder,f_type)
+          self.file_list.extend(file_list)
+          self.num_files += num_files
+          #nepi_msg.publishMsgWarn(self,"File Pub List: " + str(self.file_list))
+          #nepi_msg.publishMsgWarn(self,"File Pub Count: " + str(self.num_files))
+        if self.num_files > self.MAX_FILES: 
+          self.available_files_list = file_list[:self.MAX_FILES] # Take first MAX_PUBS files
+        else:
+          self.available_files_list = file_list
+        update_sel_files = []
+        for count, sel_file in enumerate(file_list):
+          if sel_file in self.available_files_list and count < self.MAX_PUBS:
+            update_sel_files.append(sel_file)
+        rospy.set_param('~sel_files', update_sel_files)
+        
     # Start publishing if needed
     running = rospy.get_param('~running',self.init_running)
-    if running and self.pub_pub == None:
+    if running and self.running == False:
       self.startPub()
       update_status = True
     # Publish status if needed
@@ -247,11 +314,13 @@ class NepiFilePubImgApp(object):
     if os.path.exists(new_path):
       self.last_folder = current_folder
       rospy.set_param('~current_folder',new_path)
+    self.sel_all = True
     self.publish_status()
 
 
   def homeFolderCb(self,msg):
     rospy.set_param('~current_folder',self.HOME_FOLDER)
+    self.sel_all = True
     self.publish_status()
 
   def backFolderCb(self,msg):
@@ -261,13 +330,59 @@ class NepiFilePubImgApp(object):
       if os.path.exists(new_folder):
         self.last_folder = current_folder
         rospy.set_param('~current_folder',new_folder)
+        self.sel_all = True
     self.publish_status()
 
 
 
 
+
+
   #############################
-  ## Image callbacks
+  ## Callbacks
+
+
+
+  def addAllFilesCb(self,msg):
+    self.addAllFiles()
+
+  def addAllFiles(self):
+    ##nepi_msg.publishMsgInfo(self,msg)
+    sel_files = self.available_files_list
+    if len(sel_files) > self.MAX_PUBS:
+      sel_files = sel_files[:self.MAX_PUBS]
+    rospy.set_param('~sel_files', sel_files)
+    self.publish_status()
+
+  def removeAllFilesCb(self,msg):
+    ##nepi_msg.publishMsgInfo(self,msg)
+    nepi_ros.set_param(self,'~selected_files', [])
+    self.publish_status()
+
+  def addFileCb(self,msg):
+    sel_files = rospy.get_param('~sel_files', self.init_sel_files)
+    ##nepi_msg.publishMsgInfo(self,msg)
+    file_name = msg.data
+    if len(sel_files) < self.MAX_PUBS:
+      if file_name in self.available_files_list:
+        self_files.append(file_name)
+    rospy.set_param('~sel_files', sel_files)
+    self.publish_status()
+
+  def removeFileCb(self,msg):
+    sel_files = rospy.get_param('~sel_files', self.init_sel_files)
+    ##nepi_msg.publishMsgInfo(self,msg)
+    file_name = msg.data
+    if file_name in sel_files:
+      sel_files.remove(file_name)
+    rospy.set_param('~sel_files', sel_files)
+    self.publish_status()
+
+
+  def pausePubCb(self,msg):
+    ##nepi_msg.publishMsgInfo(self,msg)
+    self.paused = msg.data
+    self.publish_status()
 
 
   def setDelayCb(self,msg):
@@ -280,63 +395,159 @@ class NepiFilePubImgApp(object):
     rospy.set_param('~delay',delay)
     self.publish_status()
 
+  def setPubTransformsCb(self,msg):
+    val = msg.data
+    rospy.set_param('~pub_transforms',  val)
+
+  def setCreateTransformsCb(self,msg):
+    val = msg.data
+    rospy.set_param('~create_transforms',  val)
+
   def startPubCb(self,msg):
     self.startPub()
 
   def startPub(self):
-    if self.pub_pub == None:
-      self.pub_pub = rospy.Publisher("~images", Image, queue_size=1, latch=True)
-      time.sleep(1)
-      current_folder = rospy.get_param('~current_folder', self.init_current_folder)
-      # Now start publishing images
-      self.file_list = []
-      self.num_files = 0
-      if os.path.exists(current_folder):
-        for f_type in self.SUPPORTED_FILE_TYPES:
-          [file_list, num_files] = nepi_ros.get_file_list(current_folder,f_type)
-          self.file_list.extend(file_list)
-          self.num_files += num_files
-          #nepi_msg.publishMsgWarn(self,"File Pub List: " + str(self.file_list))
-          #nepi_msg.publishMsgWarn(self,"File Pub Count: " + str(self.num_files))
-        if self.num_files > 0:
-          self.current_ind = 0
-          rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
-          running = True
-          rospy.set_param('~running',True)
+    create_tfs = rospy.get_param('~create_transforms',  self.init_create_transforms)
+    current_folder = rospy.get_param('~current_folder',self.init_current_folder)
+    sel_files = rospy.get_param('~sel_files', self.init_sel_files)
+    if self.running == False:
+      self.current_file_list = []
+      self.current_topic_list = []
+      self.pcds_dict = dict()
+      for pcd_filename in sel_files:
+        pcd_file = os.path.join(current_folder,pcd_filename)
+        if os.path.exists(pcd_file):
+          pcd_name = os.path.basename(pcd_file)
+          pc2_msg = None
+          try:
+            o3d_pc = o3d.io.read_point_cloud(pcd_file)
+            pc2_msg = nepi_pc.o3dpc_to_rospc(o3d_pc)
+            pcd_topic_name = os.path.basename(pcd_file).split('.')[0]
+            pcd_topic_name = pcd_topic_name.replace('-','_')
+            pcd_topic_name = pcd_topic_name.replace('.','')
+            pcd_namespace = os.path.join(self.base_namespace,self.node_name,pcd_topic_name)
+          except Exception as e:
+            nepi_msg.publishMsgWarn(self,"Failed to read pointcloud from file: " + pcd_file + " " + str(e))
+          
+          if pc2_msg != None:
+            self.pcds_dict[pcd_name] = dict()
+            self.pcds_dict[pcd_name]['file'] = pcd_file 
+            self.pcds_dict[pcd_name]['topic'] = pcd_topic_name
+            self.pcds_dict[pcd_name]['pc2_msg'] = pc2_msg
+            nepi_msg.publishMsgInfo(self,"creating publisher for file: " + pcd_file)
+            pcd_pub = rospy.Publisher(pcd_namespace, PointCloud2, queue_size=1)
+            self.pcds_dict[pcd_name]['pcd_pub'] = pcd_pub
+            self.current_file_list.append(pcd_name)
+            self.current_topic_list.append(os.path.join(self.node_name,pcd_topic_name))
+            # Process Transform Data
+            tf_dict = self.ZERO_TRANSFORM_DICT
+
+            transform_file = pcd_file.replace('.pcd','_transform.yaml')
+            if os.path.exists(transform_file):
+              try:
+                with open(transform_file, "r") as file:
+                    tf_dict = yaml.safe_load(file)
+              except Exception as e:
+                tf_dict = self.ZERO_TRANSFORM_DICT
+                nepi_msg.publishMsgWarn(self,"Failed to read transform from file: " + transform_file  + " " + str(e))
+            else:
+              if create_tfs:
+                nepi_msg.publishMsgWarn(self,"No transform file found, so creating one")
+                try:
+                  with open(transform_file, 'w') as f:
+                    yaml.dump(tf_dict, f)
+                except Exception as e:
+                  nepi_msg.publishMsgWarn(self,"Failed to write transform to file: " + transform_file + " " + str(e))
+            tf_msg = Frame3DTransform()
+            tf_msg.translate_vector.x =  tf_dict['x_m']
+            tf_msg.translate_vector.y  =  tf_dict['y_m']
+            tf_msg.translate_vector.z  =  tf_dict['z_m']
+            tf_msg.rotate_vector.x =  tf_dict['roll_deg']
+            tf_msg.rotate_vector.y =  tf_dict['pitch_deg']
+            tf_msg.rotate_vector.z =  tf_dict['yaw_deg']
+            tf_msg.heading_offset =  tf_dict['heading_deg']  
+            self.pcds_dict[pcd_name]['tf_msg'] = tf_msg
+            tfu_msg = Frame3DTransformUpdate()
+            tfu_msg.topic_namespace = pcd_namespace
+            tfu_msg.transform = tfu_msg
+            self.pcds_dict[pcd_name]['tfu_msg'] = tfu_msg
+            # Find tranform subscribers
+            for tf_sub in self.tf_subs_list:
+              try:
+                tf_sub.unregister()
+              except:
+                pass
+            self.tf_subs_list = []
+            tf_subs = nepi_ros.find_topics_by_msg('Frame3DTransformUpdate')
+            for tf_sub in tf_subs:
+              self.tf_subs_list.append(rospy.Publisher(tf_sub, Frame3DTransformUpdate, queue_size=1))
         else:
-          nepi_msg.publishMsgInfo(self,"No image files found in folder " + current_folder + " not found")
-      else:
-        nepi_msg.publishMsgInfo(self,"Folder " + current_folder + " not found")
+          nepi_msg.publishMsgInfo(self,"Could not find file " + pcd_file)
+        if len(self.pcds_dict.keys()) > 0:
+          nepi_ros.sleep(1,10)
+          self.running = True
+          rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
+          rospy.set_param('~running',True)
+
+
     self.publish_status()
 
   def stopPubCb(self,msg):
+    self.stopPub()
+
+  def stopPub(self):
     running = rospy.get_param('~running',self.init_running)
-    running = False
     rospy.set_param('~running',False)
     time.sleep(1)
-    if self.pub_pub != None:
-      self.pub_pub.unregister()
-      time.sleep(1)
-      self.pub_pub = None
-    self.current_file = "None"
+    for pcd in self.pcds_dict.keys():
+      pcd_dict = self.pcds_dict[pcd]
+      pcd_pub = pcd_dict['pcd_pub']
+      if pcd_pub != None:
+        pcd_pub.unregister()
+    # unsubscribe tranform subscribers
+    for tf_sub in self.tf_subs_list:
+      try:
+        tf_sub.unregister()
+      except:
+        pass
+    time.sleep(1)
+    pcds_dict = dict()
+    tf_subs_list = []
+    self.current_file_list = []
+    self.current_topic_list = []
+    self.running = False
     self.publish_status()
 
 
   def publishCb(self,timer):
+    pub_tfs = rospy.get_param('~pub_transforms',  self.init_pub_transforms)
     running = rospy.get_param('~running',self.init_running)
-    if running :
-      if self.pub_pub != None:
-        # Set current index
+    pcd_count = len(self.pcds_dict.keys())
+    if running and self.paused == False:
+      self.running = True
+      for pcd_name in self.pcds_dict.keys():
+        ros_timestamp = rospy.Time.now()
+        pcd_pub = None
+        try:
+          pcd_pub = self.pcds_dict[pcd_name]['pcd_pub']
+          pc2_msg = self.pcds_dict[pcd_name]['pc2_msg']
+          pc2_msg.header.stamp = ros_timestamp
+          pc2_msg.header.frame_id = 'base_link'
 
-        # Check ind bounds
-        if self.current_ind > (self.num_files-1):
-          self.current_ind = 0 # Start over
-        elif self.current_ind < 0:
-          self.current_ind = self.num_files-1
-        file2open = self.file_list[self.current_ind]
-        self.current_file = file2open.split('/')[-1]
-        #nepi_msg.publishMsgInfo(self,"Opening File: " + file2open)
- 
+          if not nepi_ros.is_shutdown():
+            pcd_pub.publish(pc2_msg)
+        except Exception as e:
+          nepi_msg.publishMsgWarn(self,"Failed to publish pcd: " + pcd_name + " " + str(e))
+        if pub_tfs:
+          for tf_sub in self.tf_subs_list:
+            try:
+              tfu_msg = self.pcds_dict[pcd_name]['tfu_msg']
+              tfu_msg.header.stamp = ros_timestamp
+              tfu_msg.header.frame_id = 'base_link'
+              if not nepi_ros.is_shutdown():
+                tf_sub.publish(tfu_msg)
+            except Exception as e:
+              nepi_msg.publishMsgWarn(self,"Failed to publish pcd: " + pcd_name + " " + str(e))
     running = rospy.get_param('~running',self.init_running)
     if running == True:
       delay = rospy.get_param('~delay',  self.init_delay) -1
@@ -345,11 +556,7 @@ class NepiFilePubImgApp(object):
       nepi_ros.sleep(delay)
       rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
     else:
-      self.current_ind = 0
-      if self.pub_pub != None:
-        self.pub_pub.unregister()
-        time.sleep(1)
-        self.pub_pub = None
+      self.stopPub()
 
 
                
@@ -365,7 +572,7 @@ class NepiFilePubImgApp(object):
 # Main
 #########################################
 if __name__ == '__main__':
-  NepiFilePubImgApp()
+  NepiFilePubPcdApp()
 
 
 
