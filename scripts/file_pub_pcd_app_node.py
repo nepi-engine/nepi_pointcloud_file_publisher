@@ -550,11 +550,11 @@ class NepiFilePubPcdApp(object):
               nepi_msg.publishMsgWarn(self,"Failed to publish pcd: " + pcd_name + " " + str(e))
     running = rospy.get_param('~running',self.init_running)
     if running == True:
-      delay = rospy.get_param('~delay',  self.init_delay) -1
+      delay = rospy.get_param('~delay',  self.init_delay)
       if delay < 0:
         delay == 0
       nepi_ros.sleep(delay)
-      rospy.Timer(rospy.Duration(1), self.publishCb, oneshot = True)
+      rospy.Timer(rospy.Duration(.001), self.publishCb, oneshot = True)
     else:
       self.stopPub()
 
