@@ -80,7 +80,6 @@ class NepiFilePubPcdApp(object):
   current_topic_list = []
 
   available_files_list = []
-  selected_files_list = []
   sel_all = False
 
   running = False
@@ -122,10 +121,10 @@ class NepiFilePubPcdApp(object):
     rospy.Subscriber('~home_folder', Empty, self.homeFolderCb)
     rospy.Subscriber('~back_folder', Empty, self.backFolderCb)
 
-    add_all_sub = rospy.Subscriber('~add_all_target_files', Empty, self.addAllFilesCb, queue_size = 10)
-    remove_all_sub = rospy.Subscriber('~remove_all_target_files', Empty, self.removeAllFilesCb, queue_size = 10)
-    add_file_sub = rospy.Subscriber('~add_target_file', String, self.addFileCb, queue_size = 10)
-    remove_file_sub = rospy.Subscriber('~remove_target_file', String, self.removeFileCb, queue_size = 10)
+    add_all_sub = rospy.Subscriber('~add_all_pcd_files', Empty, self.addAllFilesCb, queue_size = 10)
+    remove_all_sub = rospy.Subscriber('~remove_all_pcd_files', Empty, self.removeAllFilesCb, queue_size = 10)
+    add_file_sub = rospy.Subscriber('~add_pcd_file', String, self.addFileCb, queue_size = 10)
+    remove_file_sub = rospy.Subscriber('~remove_pcd_file', String, self.removeFileCb, queue_size = 10)
 
 
     # Image Pub Scubscirbers and publishers
@@ -356,7 +355,7 @@ class NepiFilePubPcdApp(object):
 
   def removeAllFilesCb(self,msg):
     ##nepi_msg.publishMsgInfo(self,msg)
-    nepi_ros.set_param(self,'~selected_files', [])
+    nepi_ros.set_param(self,'~sel_files', [])
     self.publish_status()
 
   def addFileCb(self,msg):
@@ -365,7 +364,7 @@ class NepiFilePubPcdApp(object):
     file_name = msg.data
     if len(sel_files) < self.MAX_PUBS:
       if file_name in self.available_files_list:
-        self_files.append(file_name)
+        sel_files.append(file_name)
     rospy.set_param('~sel_files', sel_files)
     self.publish_status()
 
@@ -398,10 +397,12 @@ class NepiFilePubPcdApp(object):
   def setPubTransformsCb(self,msg):
     val = msg.data
     rospy.set_param('~pub_transforms',  val)
+    self.publish_status()
 
   def setCreateTransformsCb(self,msg):
     val = msg.data
     rospy.set_param('~create_transforms',  val)
+    self.publish_status()
 
   def startPubCb(self,msg):
     self.startPub()

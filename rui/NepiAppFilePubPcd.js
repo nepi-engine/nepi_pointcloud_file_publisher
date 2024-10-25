@@ -23,8 +23,7 @@ import BooleanIndicator from "./BooleanIndicator"
 
 import CameraViewer from "./CameraViewer"
 
-import {createShortUniqueValues, onDropdownSelectedSendStr, createMenuListFromStrList} from "./Utilities"
-import {createShortValuesFromNamespaces} from "./Utilities"
+import {createShortUniqueValues, onDropdownSelectedSendStr, createMenuListFromStrList, onEnterSendFloatValue, createShortValuesFromNamespaces, onEnterSendIntValue, onUpdateSetStateValue} from "./Utilities"
 
 function round(value, decimals = 0) {
   return Number(value).toFixed(decimals)
@@ -58,6 +57,8 @@ class FilePubPcdApp extends Component {
 
       paused: false,
 
+      available_files_list: [],
+      selected_files_list: [],
 
       min_max_delay: 1,
       set_delay: 1,
@@ -81,6 +82,12 @@ class FilePubPcdApp extends Component {
     this.updateStatusListener = this.updateStatusListener.bind(this)
     this.getAppNamespace = this.getAppNamespace.bind(this)
 
+    this.toggleViewableTopics = this.toggleViewableTopics.bind(this)
+    this.onToggleFileSelection = this.onToggleFileSelection.bind(this)
+    this.getFilesOptions = this.getFilesOptions.bind(this)
+    this.getFileOptions = this.getFileOptions.bind(this)
+
+    
 
   }
 
@@ -114,7 +121,10 @@ class FilePubPcdApp extends Component {
       pub_transforms: message.pub_transforms,
       create_transforms: message.create_transforms,
 
-      pub_running: message.running
+      pub_running: message.running,
+
+      available_files_list: message.available_files_list,
+      selected_files_list: message.selected_files_list
   })
 
   var current_folder = 'None'
@@ -175,7 +185,65 @@ class FilePubPcdApp extends Component {
     }
   }
 
+  toggleViewableTopics() {
+    const set = !this.state.viewableTopics
+    this.setState({viewableTopics: set})
+  }
 
+  onToggleFileSelection(event){
+    const {sendTriggerMsg, sendStringMsg} = this.props.ros
+    const appNamespace = this.getAppNamespace()
+    const fileSelection = event.target.value
+    const selectedFiles = this.state.selected_files_list
+    const addAllNamespace = appNamespace + "/add_all_pcd_files"
+    const removeAllNamespace = appNamespace + "/remove_all_pcd_files"
+    const addNamespace = appNamespace + "/add_pcd_file"
+    const removeNamespace = appNamespace + "/remove_pcd_file"
+    if (appNamespace){
+      if (fileSelection === "None"){
+          sendTriggerMsg(removeAllNamespace)
+      }
+      else if (fileSelection === "All"){
+        sendTriggerMsg(addAllNamespace)
+    }
+      else if (selectedFiles.indexOf(fileSelection) !== -1){
+        sendStringMsg(removeNamespace,fileSelection)
+      }
+      else {
+        sendStringMsg(addNamespace,fileSelection)
+      }
+    }
+  }
+
+  getFilesOptions() {
+    const filesList = this.state.available_files_list
+    var items = []
+    items.push(<Option>{"None"}</Option>)
+    items.push(<Option>{"All"}</Option>)
+    if (filesList.length > 0 ){
+      for (var i = 0; i < filesList.length; i++) {
+          if (filesList[i] !== 'None'){
+            items.push(<Option value={filesList[i]}>{filesList[i]}</Option>)
+          }
+      }
+    }
+    return items
+    }
+
+    getFileOptions() {
+      const filesList = this.state.available_files_list
+      var items = []
+      items.push(<Option>{"None"}</Option>)
+      items.push(<Option>{"All"}</Option>)
+      if (filesList.length > 0 ){
+        for (var i = 0; i < filesList.length; i++) {
+            if (filesList[i] !== 'None'){
+              items.push(<Option value={filesList[i]}>{filesList[i]}</Option>)
+            }
+        }
+      }
+      return items
+      }
 
   renderPubControls() {
     const {sendTriggerMsg, sendStringMsg} = this.props.ros
@@ -192,9 +260,9 @@ class FilePubPcdApp extends Component {
 
         <div hidden={!this.state.connected}>
 
-          <Label title={"Publishing"}>
-              <BooleanIndicator value={pubRunning} />
-            </Label>
+        <Label title={"Publishing"}>
+          <BooleanIndicator value={pubRunning} />
+        </Label>
 
               <div hidden={pubRunning}>
             <ButtonMenu>
@@ -219,6 +287,31 @@ class FilePubPcdApp extends Component {
             <Input disabled value={this.state.file_count} />
             </Label>
 
+
+            <Label title={"Max Files"}>
+            <Input disabled value={this.state.max_pubs} />
+            </Label>
+
+              <Label title={"Set Delay (Seconds)"}>
+            <Input id="set_delay" 
+              value={this.state.set_delay} 
+              onChange={(event) => onUpdateSetStateValue.bind(this)(event,"set_delay")} 
+              onKeyDown= {(event) => onEnterSendFloatValue.bind(this)(event,appNamespace + "/set_delay")} />
+             </Label>
+
+             <Label title="Publish Transforms ">
+                  <Toggle
+                    checked={this.state.pub_transforms===true}
+                    onClick={() => this.props.ros.sendBoolMsg(appNamespace + "/set_pub_transforms",!this.state.pub_transforms)}>
+                  </Toggle>
+            </Label>
+
+            <Label title="Create Transforms">
+                  <Toggle
+                    checked={this.state.create_transforms===true}
+                    onClick={() => this.props.ros.sendBoolMsg(appNamespace + "/set_create_transforms",!this.state.create_transforms)}>
+                  </Toggle>
+            </Label>
         </div>
 
         </Column>
@@ -284,6 +377,9 @@ class FilePubPcdApp extends Component {
     const {sendTriggerMsg, sendStringMsg} = this.props.ros
     const appNamespace = this.state.appNamespace
     const folderOptions = this.createFolderOptions()
+    const fileOptions = this.getFileOptions()
+
+    const selectedFiles = this.state.selected_files_list
     const pubRunning = this.state.pub_running
     const appImageTopic = pubRunning === true ? this.state.appNamespace + "/images" : null
     const viewableFolders = (this.state.viewableFolders || pubRunning === false)
@@ -326,6 +422,30 @@ class FilePubPcdApp extends Component {
         </Column>
         <Column>
 
+        <Label title="Select Files"> </Label>
+
+        <div onClick={this.toggleViewableTopics} style={{backgroundColor: Styles.vars.colors.grey0}}>
+          <Select style={{width: "10px"}}/>
+        </div>
+        <div hidden={this.state.viewableTopics === false}>
+        {fileOptions.map((file) =>
+        <div onClick={this.onToggleFileSelection}
+          style={{
+            textAlign: "center",
+            padding: `${Styles.vars.spacing.xs}`,
+            color: Styles.vars.colors.black,
+            backgroundColor: (selectedFiles.includes(file.props.value))? Styles.vars.colors.blue : Styles.vars.colors.grey0,
+            cursor: "pointer",
+            }}>
+            <body file_name ={file} style={{color: Styles.vars.colors.black}}>{file}</body>
+        </div>
+        )}
+        </div>
+
+
+        </Column>
+        <Column>
+
         {this.renderPubControls()}
 
         </Column>
@@ -356,6 +476,10 @@ class FilePubPcdApp extends Component {
           <ButtonMenu>
           <Button onClick={() => sendTriggerMsg(appNamespace + "/save_config")}>{"Save Config"}</Button>
           </ButtonMenu>
+
+
+
+
 
         </Column>
         </Columns>
