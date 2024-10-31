@@ -387,13 +387,13 @@ class FilePubPcdApp extends Component {
 
     <Columns>
       <Column>
-
+      {/*
           <CameraViewer
             imageTopic={appImageTopic}
             title={this.state.imageText}
             hideQualitySelector={false}
           />
-
+    */}
 
     </Column>
     <Column>
