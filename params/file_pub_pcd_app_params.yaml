@@ -1,0 +1,13 @@
+APP_DICT:
+  description: Application for publishing pointclouds from pcd files
+  pkg_name: nepi_app_file_pub_pcd
+  group_name: DATA
+  config_file: app_file_pub_pcd.yaml
+  app_file: file_pub_pcd_app_node.py
+  node_name: app_file_pub_pcd
+RUI_DICT:
+  rui_menu_name: Pointcloud File Publisher
+  rui_files:
+  - NepiAppFilePubPcd.js
+  rui_main_file: NepiAppFilePubPcd.js
+  rui_main_class: FilePubPcdApp
