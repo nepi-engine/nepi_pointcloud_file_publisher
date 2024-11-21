@@ -19,10 +19,9 @@
 import React, { Component } from "react"
 import { observer, inject } from "mobx-react"
 
-import Section from "./Section"
+
 import { Columns, Column } from "./Columns"
 import Select, { Option } from "./Select"
-import { SliderAdjustment } from "./AdjustmentWidgets"
 import Button, { ButtonMenu } from "./Button"
 import Label from "./Label"
 import Input from "./Input"
@@ -31,14 +30,8 @@ import Styles from "./Styles"
 import BooleanIndicator from "./BooleanIndicator"
 
 
-import CameraViewer from "./CameraViewer"
+import { onEnterSendFloatValue,  onUpdateSetStateValue} from "./Utilities"
 
-import {createShortUniqueValues, onDropdownSelectedSendStr, createMenuListFromStrList, onEnterSendFloatValue, createShortValuesFromNamespaces, onEnterSendIntValue, onUpdateSetStateValue} from "./Utilities"
-
-function round(value, decimals = 0) {
-  return Number(value).toFixed(decimals)
-  //return value && Number(Math.round(value + "e" + decimals) + "e-" + decimals)
-}
 
 @inject("ros")
 @observer
@@ -256,11 +249,8 @@ class FilePubPcdApp extends Component {
       }
 
   renderPubControls() {
-    const {sendTriggerMsg, sendStringMsg} = this.props.ros
     const appNamespace = this.state.appNamespace
     const pubRunning = this.state.pub_running
-    const appImageTopic = pubRunning === true ? this.state.appNamespace + "/images" : null
-    const viewableFolders = (this.state.viewableFolders || pubRunning === false)
     return (
 
 
@@ -358,10 +348,8 @@ class FilePubPcdApp extends Component {
     const setNamespace = namespace + "/select_folder"
     const homeNamespace = namespace + "/home_folder"
     const backNamespace = namespace + "/back_folder"
-    const home_folder = this.state.home_folder
     const value = event.target.value
     if (namespace !== null){    
-      var selector_idx = 0
       if (value === 'Home') {
         sendTriggerMsg(homeNamespace)
       }
@@ -384,14 +372,13 @@ class FilePubPcdApp extends Component {
 
 
  render() {
-    const {sendTriggerMsg, sendStringMsg} = this.props.ros
+    const {sendTriggerMsg} = this.props.ros
     const appNamespace = this.state.appNamespace
     const folderOptions = this.createFolderOptions()
     const fileOptions = this.getFileOptions()
 
     const selectedFiles = this.state.selected_files_list
     const pubRunning = this.state.pub_running
-    const appImageTopic = pubRunning === true ? this.state.appNamespace + "/images" : null
     const viewableFolders = (this.state.viewableFolders || pubRunning === false)
     return (
 
