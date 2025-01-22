@@ -27,14 +27,14 @@ import cv2
 import open3d as o3d
 import yaml
 
-from nepi_edge_sdk_base import nepi_ros
-from nepi_edge_sdk_base import nepi_img
+from nepi_sdk import nepi_ros
+from nepi_sdk import nepi_img
 
 
-from nepi_edge_sdk_base import nepi_ros
-from nepi_edge_sdk_base import nepi_save
-from nepi_edge_sdk_base import nepi_msg
-from nepi_edge_sdk_base import nepi_pc 
+from nepi_sdk import nepi_ros
+from nepi_sdk import nepi_save
+from nepi_sdk import nepi_msg
+from nepi_sdk import nepi_pc 
 
 from nepi_app_file_pub_pcd.msg import FilePubPcdStatus
 
@@ -44,7 +44,7 @@ from sensor_msgs.msg import PointCloud2
 
 from nepi_ros_interfaces.msg import Frame3DTransform, Frame3DTransformUpdate
 
-from nepi_edge_sdk_base.save_cfg_if import SaveCfgIF
+from nepi_sdk.save_cfg_if import SaveCfgIF
 
 
 
